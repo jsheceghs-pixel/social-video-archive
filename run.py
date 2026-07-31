@@ -73,28 +73,64 @@ def detect_platform(url):
 
 
 def find_ws_url(platform):
-    """从 openclaw browser tabs 检测对应平台 tab 的 wsUrl"""
+    """通过 CDP /json 端点检测对应平台 tab 的 wsUrl（不依赖 openclaw 命令）"""
     domain = WS_DOMAIN.get(platform)
     if not domain:
         return None
-    try:
-        r = subprocess.run(['openclaw', 'browser', 'tabs', '--json'],
-                           capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
-        out = r.stdout.strip()
-        if not out:
-            return None
-        # tabs 输出可能含前缀文本，找 JSON 起始
-        start = out.find('{')
-        if start < 0:
-            return None
-        data = json.loads(out[start:])
-        for tab in data.get('tabs', []):
-            url = tab.get('url', '')
-            if domain in url and tab.get('type') == 'page' and tab.get('wsUrl'):
-                return tab['wsUrl']
-    except Exception as e:
-        print(f'  [提示] 检测浏览器 tab 失败: {e}')
+    # 浏览器 CDP 调试端口（openclaw browser 固定 18800）
+    for port in (18800, 9222, 9223):
+        try:
+            r = subprocess.run(
+                ['curl.exe', '-s', '--max-time', '5', f'http://127.0.0.1:{port}/json'],
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10)
+            data = json.loads(r.stdout or '[]')
+            for tab in data:
+                if tab.get('type') == 'page' and domain in tab.get('url', ''):
+                    ws = tab.get('webSocketDebuggerUrl')
+                    if ws:
+                        return ws
+        except Exception:
+            continue
     return None
+
+
+def create_tab(url=None):
+    """创建独立采集 tab（不干扰用户正在看的页面），返回 (tabId, wsUrl)
+    用 about:blank 创建，实际导航由各 process 脚本的 cdp_navigate 完成（避免 URL 编码/JS 问题）"""
+    target = url or 'about:blank'
+    import urllib.parse
+    enc = urllib.parse.quote(target, safe=':/?&=%')
+    for port in (18800, 9222, 9223):
+        try:
+            r = subprocess.run(
+                ['curl.exe', '-s', '-X', 'PUT', '--max-time', '10', f'http://127.0.0.1:{port}/json/new?{enc}'],
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15)
+            j = json.loads(r.stdout or '{}')
+            if j.get('webSocketDebuggerUrl'):
+                return j.get('id'), j.get('webSocketDebuggerUrl')
+        except Exception:
+            continue
+    return None, None
+
+def resolve_shortlink(url):
+    """解析短链/分享链接（v.douyin.com / v.kuaishou.com / kuaishou.com/f/ 等），返回跳转后的最终 URL"""
+    # 短链域名 + 快手 /f/ 分享路径（跳转后才是 short-video 详情页）
+    short_domains = ('v.douyin.com', 'v.kuaishou.com', 'xhslink.com', 'b23.tv', 'kuaishou.com/f/', 'kuaishou.com/fw/')
+    if not any(d in (url or '') for d in short_domains):
+        return url
+    print(f'[短链] 解析跳转...')
+    try:
+        r = subprocess.run(
+            ['curl.exe', '-s', '-L', '-o', 'NUL', '-w', '%{url_effective}', '--max-time', '30', url,
+             '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=45)
+        final = r.stdout.strip()
+        if final:
+            print(f'  跳转至: {final[:90]}')
+            return final
+    except Exception as e:
+        print(f'  [提示] 短链解析失败: {e}')
+    return url
 
 
 def find_result_file(platform, workdir, link):
@@ -147,15 +183,25 @@ def main():
     print(f'== 平台: {platform} ==')
     print(f'== 链接: {link[:90]} ==')
 
+    # 短链解析（v.douyin.com / v.kuaishou.com / xhslink.com / b23.tv）
+    link = resolve_shortlink(link)
+
     # 构造子进程环境
     env = dict(os.environ)
     env['PYTHONIOENCODING'] = 'utf-8'
     env['SOCIAL_WORKDIR'] = args.workdir
 
-    # 需要 wsUrl 的平台：自动检测（或 --ws-url 手动指定）
+    # 需要 wsUrl 的平台：优先创建独立采集 tab（不干扰用户浏览），失败才回退现有 tab
     ws_env_name = WS_ENV.get(platform)
     if ws_env_name:
-        ws_url = args.ws_url or find_ws_url(platform)
+        ws_url = args.ws_url
+        tab_id = None
+        if not ws_url:
+            print('[浏览器] 创建独立采集 tab（不干扰你正在看的页面）...')
+            tab_id, ws_url = create_tab(link)
+        if not ws_url:
+            print('  [回退] 新 tab 创建失败，尝试使用现有 tab...')
+            ws_url = find_ws_url(platform)
         if ws_url:
             print(f'[OK] 浏览器 wsUrl: {ws_url[:60]}...')
             if platform == 'kuaishou':
