@@ -1,0 +1,29 @@
+# 凭据 - 绝不提交
+config/
+*.cookies.json
+douyin_cookies.json
+cookies.txt
+_token.txt
+api_keys.js
+*.token
+
+# 产物与中间数据
+output/
+__pycache__/
+*.pyc
+
+# 本地测试/临时文件
+_payload_*.json
+_cdp_expr.js
+test_*.mp3
+test_*.mp4
+test_*.srt
+test_*_raw.txt
+danmaku_*.json
+comments_*.json
+notion_*.json
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
