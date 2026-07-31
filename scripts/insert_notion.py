@@ -163,6 +163,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('result_json')
     ap.add_argument('--dry-run', action='store_true', help='只打印 payload 不入库')
+    ap.add_argument('--update', action='store_true', help='链接已存在时更新正文（默认跳过）')
     args = ap.parse_args()
 
     r = json.load(open(args.result_json, encoding='utf-8'))
@@ -171,18 +172,24 @@ def main():
         print('[FAIL] 未找到 Notion token')
         sys.exit(1)
 
+    props = build_properties(r)
+
     # 去重：按链接检查是否已存在
     url = r.get('url', '')
+    existing_id = None
     if url:
         print('[去重] 检查链接是否已存在:', url[:80])
         existing = query_existing_by_url(token, url)
         if existing:
-            ids = [p['id'] for p in existing]
-            print(f'[SKIP] 该链接已存在 {len(existing)} 条记录，跳过入库: {ids}')
-            return
-        print('[OK] 链接不存在，继续入库')
+            existing_id = existing[0]['id']
+            if not args.update:
+                ids = [p['id'] for p in existing]
+                print(f'[SKIP] 该链接已存在 {len(existing)} 条记录，跳过入库（--update 可覆盖更新）: {ids}')
+                return
+            print(f'[UPDATE] 链接已存在，将覆盖更新: {existing_id}')
+        else:
+            print('[OK] 链接不存在，新建入库')
 
-    props = build_properties(r)
     page = {'parent': {'data_source_id': DATA_SOURCE_ID}, 'properties': props}
     payload = json.dumps(page, ensure_ascii=False)
 
@@ -195,24 +202,38 @@ def main():
     with open(payload_file, 'w', encoding='utf-8') as f:
         f.write(payload)
 
-    cmd = [
-        'curl.exe', '-s', '-w', '\nHTTP_STATUS:%{http_code}',
-        'https://api.notion.com/v1/pages',
-        '-H', f'Authorization: Bearer {token}',
-        '-H', 'Notion-Version: 2026-03-11',
-        '-H', 'Content-Type: application/json',
-        '--data-binary', f'@{payload_file}',
-    ]
+    # 已存在 → PATCH 更新；不存在 → POST 新建
+    if existing_id:
+        cmd = [
+            'curl.exe', '-s', '-w', '\nHTTP_STATUS:%{http_code}',
+            f'https://api.notion.com/v1/pages/{existing_id}',
+            '-X', 'PATCH',
+            '-H', f'Authorization: Bearer {token}',
+            '-H', 'Notion-Version: 2026-03-11',
+            '-H', 'Content-Type: application/json',
+            '--data-binary', f'@{payload_file}',
+        ]
+    else:
+        cmd = [
+            'curl.exe', '-s', '-w', '\nHTTP_STATUS:%{http_code}',
+            'https://api.notion.com/v1/pages',
+            '-H', f'Authorization: Bearer {token}',
+            '-H', 'Notion-Version: 2026-03-11',
+            '-H', 'Content-Type: application/json',
+            '--data-binary', f'@{payload_file}',
+        ]
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
     out = result.stdout + result.stderr
     print(out[-800:])
 
     if 'HTTP_STATUS:200' in out:
         m = re.search(r'"url":"(https://app\.notion\.com/[^"]+)"', out)
-        print('\n[OK] 已入库 Notion「存档记录」')
+        print('\n[OK] 已写入 Notion「存档记录」' + ('（更新）' if existing_id else '（新建）'))
         print(f'   标题: {r.get("title", "")[:40]}')
         if m:
             print(f'   页面: {m.group(1)}')
+        else:
+            print(f'   页面ID: {existing_id or "?"}')
     else:
         print('\n[FAIL] 入库失败，见上方响应')
 
