@@ -200,18 +200,20 @@ def main():
 
         # 高能分析
         if danmaku_list:
-            dm_file = os.path.join(out_dir, 'danmaku.json')
+            # douyin_fusion.js 期望 danmaku_<id>.json + test_<id>.srt 与输出同目录（BASE=__dirname）
+            dm_file = os.path.join(out_dir, f'danmaku_{aweme_id}.json')
             with open(dm_file, 'w', encoding='utf-8') as f:
                 json.dump({'total': len(danmaku_list), 'danmaku': danmaku_list}, f, ensure_ascii=False)
-            # douyin_fusion.js 期望文件名 danmaku_<id>.json 和 test_<id>.srt 在 BASE 下，这里改为直接传
-            run(['node', FUSION, aweme_id], cwd=BASE)
-            hl_file = os.path.join(BASE, f'{aweme_id}_AI_HIGHLIGHT.txt')
+            # 复制 SRT 为 fusion 期望的文件名
+            srt_src = os.path.join(out_dir, 'audio.srt')
+            srt_link = os.path.join(out_dir, f'test_{aweme_id}.srt')
+            if os.path.exists(srt_src) and not os.path.exists(srt_link):
+                import shutil
+                shutil.copy(srt_src, srt_link)
+            run(['node', FUSION, aweme_id], cwd=out_dir)
+            hl_file = os.path.join(out_dir, f'{aweme_id}_AI_HIGHLIGHT.txt')
             if os.path.exists(hl_file):
                 hl_text = open(hl_file, encoding='utf-8').read()
-                # 移到产物目录
-                import shutil
-                shutil.move(hl_file, os.path.join(out_dir, 'AI_HIGHLIGHT.txt'))
-                hl_file = os.path.join(out_dir, 'AI_HIGHLIGHT.txt')
             print(f'  高能摘要: {len(hl_text)} 字')
 
     # ---- 5. 评论（CDP，可选）----
