@@ -39,18 +39,25 @@ def query_existing_by_url(token, url):
         },
         'page_size': 10,
     })
-    req = urllib.request.Request(
+    # 用 curl 发请求（urllib 直连 api.notion.com 会被掐连接 WinError 10054）
+    body_file = os.path.join(os.environ.get('TEMP', '.'), '_notion_query.json')
+    with open(body_file, 'w', encoding='utf-8') as f:
+        f.write(body)
+    cmd = [
+        'curl.exe', '-s',
         f'https://api.notion.com/v1/data_sources/{DATA_SOURCE_ID}/query',
-        data=body.encode('utf-8'),
-        headers={
-            'Authorization': f'Bearer {token}',
-            'Notion-Version': '2026-03-11',
-            'Content-Type': 'application/json',
-        },
-        method='POST',
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        j = json.loads(resp.read().decode('utf-8'))
+        '-H', f'Authorization: Bearer {token}',
+        '-H', 'Notion-Version: 2026-03-11',
+        '-H', 'Content-Type: application/json',
+        '--data-binary', f'@{body_file}',
+        '--max-time', '30',
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    try:
+        os.remove(body_file)
+    except Exception:
+        pass
+    j = json.loads(r.stdout or '{}')
     results = j.get('results') or []
     return [p for p in results if not p.get('in_trash')]
 
