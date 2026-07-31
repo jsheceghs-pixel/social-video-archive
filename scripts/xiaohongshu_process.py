@@ -47,8 +47,25 @@ def cdp_eval(ws_url, expression):
         return None
 
 
+def cdp_navigate(ws_url, url, wait_ms=10000):
+    """通过 CDP 导航页面并等待加载（评论提取前确保页面是目标笔记）"""
+    nav_script = config.CDP_NAVIGATE_JS
+    r = subprocess.run(['node', nav_script, ws_url, url, str(wait_ms)],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=wait_ms // 1000 + 30)
+    out = r.stdout.strip()
+    if not out:
+        return None
+    out = out.split('\n')[-1]
+    try:
+        return json.loads(out).get('value')
+    except Exception:
+        print('[CDP导航]', out[:300])
+        return None
+
+
 def extract_note_id(url):
-    m = re.search(r'/explore/([0-9a-f]{24})', url or '')
+    """支持 /explore/ 和 /discovery/item/ 两种笔记路径"""
+    m = re.search(r'(?:/explore/|/discovery/item/)([0-9a-f]{24})', url or '')
     return m.group(1) if m else None
 
 
@@ -125,6 +142,40 @@ def main():
     comments = []
     ws_url_xhs = os.environ.get('XHS_WS_URL', '')
     if ws_url_xhs:
+        # 先导航到目标笔记页（确保 SSR 数据是当前笔记的）
+        print('  导航到目标笔记页...')
+        nav_state = cdp_navigate(ws_url_xhs, post.page_url or url)
+        if nav_state:
+            print(f'  页面: {str(nav_state)[:80]}')
+        else:
+            print('  [提示] 导航可能未完成，尝试直接提取')
+        # 评论是异步加载的，轮询等待 firstRequestFinish=true 或 list 非空
+        wait_expr = """(() => {
+          const s = window.__INITIAL_STATE__;
+          if (!s || !s.note) return JSON.stringify({ready: false});
+          const noteMap = s.note.noteDetailMap || {};
+          const firstKey = Object.keys(noteMap)[0];
+          const c = firstKey ? (noteMap[firstKey].comments || {}) : {};
+          const list = c.list || [];
+          return JSON.stringify({ready: list.length > 0 || c.firstRequestFinish === true, count: list.length});
+        })()"""
+        ready = False
+        for _attempt in range(8):
+            val = cdp_eval(ws_url_xhs, wait_expr)
+            if val:
+                try:
+                    st = json.loads(val)
+                    if st.get('ready'):
+                        ready = True
+                        print(f'  评论加载完成: {st.get("count")} 条')
+                        break
+                except Exception:
+                    pass
+            print('  [等待] 评论加载中...')
+            import time as _t
+            _t.sleep(2)
+        if not ready:
+            print('  [提示] 等待超时，使用当前 SSR 数据')
         expr = """(() => {
           const s = window.__INITIAL_STATE__;
           if (!s || !s.note) return JSON.stringify({err: 'no ssr'});
@@ -154,6 +205,23 @@ def main():
     # ---- 5. 数据契约 ----
     print('\n[5/5] 生成数据契约...')
     metrics = post.public_metrics or {}
+
+    def parse_count(v):
+        """解析 '3.1万' / '1280' / '1.2千' 等显示格式为整数"""
+        if v is None:
+            return None
+        s = str(v).strip()
+        m = re.match(r'^([\d.]+)\s*(万|w|千|k)?$', s, re.IGNORECASE)
+        if not m:
+            return None
+        num = float(m.group(1))
+        unit = (m.group(2) or '').lower()
+        if unit in ('万', 'w'):
+            return int(num * 10000)
+        if unit in ('千', 'k'):
+            return int(num * 1000)
+        return int(num)
+
     result = {
         'platform': 'xiaohongshu',
         'note_id': note_id,
@@ -165,10 +233,10 @@ def main():
         'duration_sec': post.duration_sec,
         'metrics': {
             'views': None,
-            'likes': int(metrics.get('likes') or 0) if metrics.get('likes') else None,
-            'collects': int(metrics.get('collects') or 0) if metrics.get('collects') else None,
-            'comments': int(metrics.get('comments') or 0) if metrics.get('comments') else None,
-            'shares': int(metrics.get('shares') or 0) if metrics.get('shares') else None,
+            'likes': parse_count(metrics.get('likes')),
+            'collects': parse_count(metrics.get('collects')),
+            'comments': parse_count(metrics.get('comments')),
+            'shares': parse_count(metrics.get('shares')),
         },
         'asr_text': raw_text,
         'srt': open(srt_file, encoding='utf-8').read(),
