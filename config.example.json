@@ -1,0 +1,11 @@
+{
+  "_comment": "复制为 config/ 下的本地文件使用（不提交仓库）。所有路径也可用环境变量覆盖，见 README。",
+  "NOTION_TOKEN": "ntn_xxx 填你的 Notion API Token",
+  "SOCIAL_WORKDIR": "./output",
+  "PYTHON_BIN": "python",
+  "GEN_SRT_PATH": "D:/danmaku-to-summary-ts-main/src/scripts/gen_srt.py",
+  "BILI_FUSION_PATH": "D:/danmaku-to-summary-ts-main/src/scripts/do_fusion_summary.js",
+  "FFMPEG_BIN": "C:/Users/<you>/ffmpeg/bin/ffmpeg.exe",
+  "SOCIALKIT_DIR": "D:/social-media-toolkit",
+  "DOUYIN_COOKIES": "./config/douyin_cookies.json"
+}
