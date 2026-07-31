@@ -74,6 +74,7 @@ def main():
         'scripts/insert_notion.py',
         'scripts/douyin_fusion.js',
         'scripts/cdp_eval.js',
+        'scripts/cdp_navigate.js',
         'scripts/bili_dm_parse.py',
     ]
     print(f'上传 {len(files)} 个文件到 {REPO}@{BRANCH}...')
