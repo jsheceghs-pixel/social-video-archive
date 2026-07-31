@@ -31,10 +31,16 @@ def _env_or_default(key, default):
 WORKDIR = _env_or_default('SOCIAL_WORKDIR', os.path.join(PROJECT_ROOT, 'output'))
 
 # ---- 外部工具路径（按需覆盖）----
-PYTHON_BIN = _env_or_default('PYTHON_BIN', sys.executable)
+# 带 FunASR 的 Python（采集/ASR 用）
+PYTHON_BIN = _env_or_default(
+    'PYTHON_BIN',
+    r'D:\social-media-toolkit\.venv\Scripts\python.exe',
+)
+# 轻量 Python（run.py 调度用，无 FunASR 依赖也行）
+RUNNER_PYTHON = _env_or_default('RUNNER_PYTHON', sys.executable)
 GEN_SRT_PATH = _env_or_default(
     'GEN_SRT_PATH',
-    r'D:\danmaku-to-summary-ts-main\src\scripts\gen_srt.py',
+    os.path.join(PROJECT_ROOT, 'scripts', 'gen_srt.py'),  # 项目自带副本（自包含）
 )
 FUSION_PATH = _env_or_default(
     'FUSION_PATH',
@@ -53,6 +59,16 @@ DOUYIN_COOKIES = _env_or_default(
     os.path.join(PROJECT_ROOT, 'config', 'douyin_cookies.json'),
 )
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN', '')
+
+# 本地敏感配置（config/secret.json，gitignore 排除，不提交仓库）
+_SECRET_FILE = os.path.join(PROJECT_ROOT, 'config', 'secret.json')
+if not NOTION_TOKEN and os.path.exists(_SECRET_FILE):
+    try:
+        with open(_SECRET_FILE, encoding='utf-8') as _f:
+            _secret = json.load(_f)
+        NOTION_TOKEN = _secret.get('NOTION_TOKEN', '') or NOTION_TOKEN
+    except Exception:
+        pass
 
 # B站弹幕融合（danmaku-to-summary-ts 项目内）
 BILI_FUSION_PATH = _env_or_default(
