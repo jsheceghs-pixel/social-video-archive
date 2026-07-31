@@ -29,10 +29,16 @@ UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like 
 
 
 def http_get(url, referer='https://www.bilibili.com/', timeout=60, binary=False):
-    """B站 API GET，带 UA + Referer"""
-    req = urllib.request.Request(url, headers={'User-Agent': UA, 'Referer': referer})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = resp.read()
+    """B站 API GET，用 curl（urllib 偶发卡死/被 B站 TLS 指纹拒绝）"""
+    import tempfile
+    tmp = os.path.join(tempfile.gettempdir(), 'bili_http_tmp')
+    cmd = ['curl.exe', '-s', '-L', '--max-time', str(timeout), '-o', tmp,
+           url, '-H', f'User-Agent: {UA}', '-H', f'Referer: {referer}']
+    r = subprocess.run(cmd, capture_output=True, timeout=timeout + 15)
+    if not os.path.exists(tmp):
+        raise RuntimeError(f'curl 下载失败: {url[:60]}')
+    data = open(tmp, 'rb').read()
+    os.remove(tmp)
     if binary:
         return data
     return data.decode('utf-8', errors='replace')
