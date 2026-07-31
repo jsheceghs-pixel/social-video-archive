@@ -1,0 +1,315 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>四平台视频工作流总览</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --fg: #172033;
+    --muted: #5b6475;
+    --line: #64748b;
+    --neutral: #e2e8f0;
+    --input: #bfdbfe;
+    --process: #c7d2fe;
+    --storage: #99f6e4;
+    --external: #fde68a;
+    --risk: #fecaca;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f172a;
+      --fg: #e5e7eb;
+      --muted: #a3adbd;
+      --line: #94a3b8;
+      --neutral: #334155;
+      --input: #1d4ed8;
+      --process: #4338ca;
+      --storage: #0f766e;
+      --external: #92400e;
+      --risk: #991b1b;
+    }
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  main {
+    max-width: 1760px;
+    margin: 24px auto;
+    padding: 0 16px;
+  }
+  svg { width: 100%; height: auto; display: block; }
+  .title { font-size: 22px; font-weight: 700; fill: var(--fg); }
+  .subtitle { font-size: 13px; fill: var(--muted); }
+  .plat { font-size: 15px; font-weight: 700; fill: var(--fg); }
+  .plat-sub { font-size: 11px; fill: var(--muted); }
+  .label { font-size: 13px; font-weight: 600; fill: var(--fg); }
+  .small { font-size: 11px; fill: var(--muted); }
+  .node { stroke: var(--line); stroke-width: 1; }
+  .neutral { fill: var(--neutral); }
+  .input { fill: var(--input); }
+  .process { fill: var(--process); }
+  .storage { fill: var(--storage); }
+  .external { fill: var(--external); }
+  .risk { fill: var(--risk); }
+  .edge { stroke: var(--line); stroke-width: 1.5; fill: none; }
+  .zone { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 6 5; opacity: 0.85; }
+  .opt-num { font-size: 13px; font-weight: 700; fill: #fff; }
+  .opt-badge { fill: #dc2626; stroke: #991b1b; stroke-width: 1; }
+  .legend-title { font-size: 14px; font-weight: 700; fill: var(--fg); }
+  .legend-text { font-size: 12px; fill: var(--muted); }
+</style>
+<main>
+<svg viewBox="0 0 1720 990" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="四平台视频工作流总览图">
+  <!-- ===== 标题 ===== -->
+  <text class="title" x="20" y="34">四平台视频工作流总览（B站 / 抖音 / 小红书 / 快手）</text>
+  <text class="subtitle" x="20" y="56">链接 → 采集（元数据/音频/ASR/弹幕/评论）→ 数据契约 result.json → 统一入库 Notion「存档记录」　·　红色虚线框 + ①~⑤ = 建议优化点</text>
+
+  <!-- ===== 定义箭头 ===== -->
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 Z" fill="var(--line)" />
+    </marker>
+  </defs>
+
+  <!-- ============================================================ -->
+  <!-- ===== 行1: B站 ===== -->
+  <text class="plat" x="20" y="112">B站</text>
+  <text class="plat-sub" x="20" y="130">bilibili_process.py · 官方API直连（无需登录）</text>
+  <!-- 平台徽章 -->
+  <rect class="node neutral" x="20" y="140" width="112" height="64" rx="8" />
+  <text class="label" x="76" y="168" text-anchor="middle">B站</text>
+  <text class="small" x="76" y="186" text-anchor="middle">API直连</text>
+
+  <!-- 步骤: 链接→bvid -->
+  <rect class="node input" x="150" y="140" width="170" height="64" rx="8" />
+  <text class="label" x="235" y="166" text-anchor="middle">分享链接</text>
+  <text class="small" x="235" y="184" text-anchor="middle">提取 bvid</text>
+
+  <!-- 步骤: 元数据 -->
+  <rect class="node process" x="340" y="140" width="170" height="64" rx="8" />
+  <text class="label" x="425" y="166" text-anchor="middle">官方API 元数据</text>
+  <text class="small" x="425" y="184" text-anchor="middle">view?bvid= 1.7s</text>
+
+  <!-- 步骤: 音频 -->
+  <rect class="node external" x="530" y="140" width="170" height="64" rx="8" />
+  <text class="label" x="615" y="166" text-anchor="middle">音频直链下载</text>
+  <text class="small" x="615" y="184" text-anchor="middle">playurl m4s</text>
+
+  <!-- 步骤: ASR -->
+  <rect class="node process" x="720" y="140" width="170" height="64" rx="8" />
+  <text class="label" x="805" y="166" text-anchor="middle">FunASR ASR</text>
+  <text class="small" x="805" y="184" text-anchor="middle">→ SRT 字幕</text>
+
+  <!-- 步骤: 弹幕 -->
+  <rect class="node process" x="910" y="140" width="170" height="64" rx="8" />
+  <text class="label" x="995" y="166" text-anchor="middle">弹幕 XML</text>
+  <text class="small" x="995" y="184" text-anchor="middle">dm/list.so?oid=cid</text>
+
+  <!-- 步骤: 高能 -->
+  <rect class="node process" x="1100" y="140" width="170" height="64" rx="8" />
+  <text class="label" x="1185" y="166" text-anchor="middle">弹幕高能分析</text>
+  <text class="small" x="1185" y="184" text-anchor="middle">do_fusion_summary.js</text>
+
+  <!-- 步骤: 数据契约 -->
+  <rect class="node storage" x="1290" y="140" width="190" height="64" rx="8" />
+  <text class="label" x="1385" y="166" text-anchor="middle">数据契约</text>
+  <text class="small" x="1385" y="184" text-anchor="middle">result.json</text>
+
+  <!-- B站箭头 -->
+  <path class="edge" d="M138 172 L148 172" marker-end="url(#arrow)" />
+  <path class="edge" d="M320 172 L338 172" marker-end="url(#arrow)" />
+  <path class="edge" d="M700 172 L718 172" marker-end="url(#arrow)" />
+  <path class="edge" d="M890 172 L908 172" marker-end="url(#arrow)" />
+  <path class="edge" d="M1080 172 L1098 172" marker-end="url(#arrow)" />
+  <path class="edge" d="M1270 172 L1288 172" marker-end="url(#arrow)" />
+
+  <!-- ============================================================ -->
+  <!-- ===== 行2: 抖音 ===== -->
+  <text class="plat" x="20" y="252">抖音</text>
+  <text class="plat-sub" x="20" y="270">douyin_process.py · web API + 浏览器CDP</text>
+  <rect class="node neutral" x="20" y="280" width="112" height="64" rx="8" />
+  <text class="label" x="76" y="308" text-anchor="middle">抖音</text>
+  <text class="small" x="76" y="326" text-anchor="middle">需cookie+CDP</text>
+
+  <rect class="node input" x="150" y="280" width="170" height="64" rx="8" />
+  <text class="label" x="235" y="306" text-anchor="middle">分享链接</text>
+  <text class="small" x="235" y="324" text-anchor="middle">提取 aweme_id</text>
+
+  <rect class="node process" x="340" y="280" width="170" height="64" rx="8" />
+  <text class="label" x="425" y="306" text-anchor="middle">web API 元数据</text>
+  <text class="small" x="425" y="324" text-anchor="middle">aweme/detail</text>
+
+  <rect class="node external" x="530" y="280" width="170" height="64" rx="8" />
+  <text class="label" x="615" y="306" text-anchor="middle">音频直链下载</text>
+  <text class="small" x="615" y="324" text-anchor="middle">music.play_url</text>
+
+  <rect class="node process" x="720" y="280" width="170" height="64" rx="8" />
+  <text class="label" x="805" y="306" text-anchor="middle">FunASR ASR</text>
+  <text class="small" x="805" y="324" text-anchor="middle">→ SRT 字幕</text>
+
+  <!-- 弹幕CDP（风险色） -->
+  <rect class="node risk" x="910" y="280" width="170" height="64" rx="8" />
+  <text class="label" x="995" y="306" text-anchor="middle">弹幕 CDP ①</text>
+  <text class="small" x="995" y="324" text-anchor="middle">get_v2 32s分片</text>
+  <circle class="opt-badge" cx="1095" cy="288" r="10" />
+  <text class="opt-num" x="1095" y="292" text-anchor="middle">①</text>
+
+  <rect class="node process" x="1100" y="280" width="170" height="64" rx="8" />
+  <text class="label" x="1185" y="306" text-anchor="middle">弹幕高能分析</text>
+  <text class="small" x="1185" y="324" text-anchor="middle">douyin_fusion.js</text>
+
+  <!-- 评论CDP（风险色） -->
+  <rect class="node risk" x="1290" y="280" width="170" height="64" rx="8" />
+  <text class="label" x="1375" y="306" text-anchor="middle">评论 CDP ①</text>
+  <text class="small" x="1375" y="324" text-anchor="middle">comment/list</text>
+  <circle class="opt-badge" cx="1475" cy="288" r="10" />
+  <text class="opt-num" x="1475" y="292" text-anchor="middle">①</text>
+
+  <rect class="node storage" x="1480" y="280" width="200" height="64" rx="8" />
+  <text class="label" x="1580" y="306" text-anchor="middle">数据契约</text>
+  <text class="small" x="1580" y="324" text-anchor="middle">result.json</text>
+
+  <path class="edge" d="M138 312 L148 312" marker-end="url(#arrow)" />
+  <path class="edge" d="M320 312 L338 312" marker-end="url(#arrow)" />
+  <path class="edge" d="M700 312 L718 312" marker-end="url(#arrow)" />
+  <path class="edge" d="M890 312 L908 312" marker-end="url(#arrow)" />
+  <path class="edge" d="M1080 312 L1098 312" marker-end="url(#arrow)" />
+  <path class="edge" d="M1270 312 L1288 312" marker-end="url(#arrow)" />
+  <path class="edge" d="M1460 312 L1478 312" marker-end="url(#arrow)" />
+
+  <!-- ① 虚线框：抖音 CDP 段 -->
+  <rect class="zone" x="902" y="270" width="566" height="84" rx="10" />
+
+  <!-- ============================================================ -->
+  <!-- ===== 行3: 小红书 ===== -->
+  <text class="plat" x="20" y="392">小红书</text>
+  <text class="plat-sub" x="20" y="410">xiaohongshu_process.py · socialkit + SSR 评论</text>
+  <rect class="node neutral" x="20" y="420" width="112" height="64" rx="8" />
+  <text class="label" x="76" y="448" text-anchor="middle">小红书</text>
+  <text class="small" x="76" y="466" text-anchor="middle">仅视频</text>
+
+  <rect class="node risk" x="150" y="420" width="170" height="64" rx="8" />
+  <text class="label" x="235" y="446" text-anchor="middle">分享链接 ③</text>
+  <text class="small" x="235" y="464" text-anchor="middle">需 xsec_token</text>
+  <circle class="opt-badge" cx="335" cy="428" r="10" />
+  <text class="opt-num" x="335" y="432" text-anchor="middle">③</text>
+
+  <rect class="node process" x="340" y="420" width="170" height="64" rx="8" />
+  <text class="label" x="425" y="446" text-anchor="middle">socialkit 元数据</text>
+  <text class="small" x="425" y="464" text-anchor="middle">视频直链</text>
+
+  <rect class="node external" x="530" y="420" width="170" height="64" rx="8" />
+  <text class="label" x="615" y="446" text-anchor="middle">视频下载→提音频</text>
+  <text class="small" x="615" y="464" text-anchor="middle">ffmpeg</text>
+
+  <rect class="node process" x="720" y="420" width="170" height="64" rx="8" />
+  <text class="label" x="805" y="446" text-anchor="middle">FunASR ASR</text>
+  <text class="small" x="805" y="464" text-anchor="middle">→ SRT 字幕</text>
+
+  <rect class="node process" x="910" y="420" width="170" height="64" rx="8" />
+  <text class="label" x="995" y="446" text-anchor="middle">评论 SSR 提取</text>
+  <text class="small" x="995" y="464" text-anchor="middle">noteDetailMap</text>
+
+  <rect class="node storage" x="1100" y="420" width="190" height="64" rx="8" />
+  <text class="label" x="1195" y="446" text-anchor="middle">数据契约</text>
+  <text class="small" x="1195" y="464" text-anchor="middle">result.json</text>
+
+  <!-- 无弹幕标注 -->
+  <text class="small" x="1300" y="452">无弹幕（网页版确认）</text>
+
+  <path class="edge" d="M138 452 L148 452" marker-end="url(#arrow)" />
+  <path class="edge" d="M320 452 L338 452" marker-end="url(#arrow)" />
+  <path class="edge" d="M700 452 L718 452" marker-end="url(#arrow)" />
+  <path class="edge" d="M890 452 L908 452" marker-end="url(#arrow)" />
+  <path class="edge" d="M1080 452 L1098 452" marker-end="url(#arrow)" />
+
+  <!-- ============================================================ -->
+  <!-- ===== 行4: 快手 ===== -->
+  <text class="plat" x="20" y="532">快手</text>
+  <text class="plat-sub" x="20" y="550">kuaishou_process.py · Apollo CDP + curl</text>
+  <rect class="node neutral" x="20" y="560" width="112" height="64" rx="8" />
+  <text class="label" x="76" y="588" text-anchor="middle">快手</text>
+  <text class="small" x="76" y="606" text-anchor="middle">需CDP</text>
+
+  <rect class="node input" x="150" y="560" width="170" height="64" rx="8" />
+  <text class="label" x="235" y="586" text-anchor="middle">分享链接</text>
+  <text class="small" x="235" y="604" text-anchor="middle">short-video/短链</text>
+
+  <rect class="node risk" x="340" y="560" width="170" height="64" rx="8" />
+  <text class="label" x="425" y="586" text-anchor="middle">Apollo 元数据 ②</text>
+  <text class="small" x="425" y="604" text-anchor="middle">__APOLLO_STATE__</text>
+  <circle class="opt-badge" cx="525" cy="568" r="10" />
+  <text class="opt-num" x="525" y="572" text-anchor="middle">②</text>
+
+  <rect class="node external" x="530" y="560" width="170" height="64" rx="8" />
+  <text class="label" x="615" y="586" text-anchor="middle">curl 视频→提音频</text>
+  <text class="small" x="615" y="604" text-anchor="middle">urllib被拒</text>
+
+  <rect class="node process" x="720" y="560" width="170" height="64" rx="8" />
+  <text class="label" x="805" y="586" text-anchor="middle">FunASR ASR</text>
+  <text class="small" x="805" y="604" text-anchor="middle">→ SRT 字幕</text>
+
+  <rect class="node risk" x="910" y="560" width="170" height="64" rx="8" />
+  <text class="label" x="995" y="586" text-anchor="middle">评论 CDP ②</text>
+  <text class="small" x="995" y="604" text-anchor="middle">comment/list</text>
+  <circle class="opt-badge" cx="1095" cy="568" r="10" />
+  <text class="opt-num" x="1095" y="572" text-anchor="middle">②</text>
+
+  <rect class="node storage" x="1100" y="560" width="190" height="64" rx="8" />
+  <text class="label" x="1195" y="586" text-anchor="middle">数据契约</text>
+  <text class="small" x="1195" y="604" text-anchor="middle">result.json</text>
+
+  <!-- 无弹幕标注 -->
+  <text class="small" x="1300" y="592">无弹幕（网页版确认）</text>
+
+  <path class="edge" d="M138 592 L148 592" marker-end="url(#arrow)" />
+  <path class="edge" d="M320 592 L338 592" marker-end="url(#arrow)" />
+  <path class="edge" d="M510 592 L528 592" marker-end="url(#arrow)" />
+  <path class="edge" d="M700 592 L718 592" marker-end="url(#arrow)" />
+  <path class="edge" d="M890 592 L908 592" marker-end="url(#arrow)" />
+
+  <!-- ② 虚线框：快手 CDP 段 -->
+  <rect class="zone" x="332" y="550" width="756" height="84" rx="10" />
+
+  <!-- ============================================================ -->
+  <!-- ===== 底部收口: 统一入库 ===== -->
+  <!-- 四行数据契约 → insert_notion.py -->
+  <path class="edge" d="M1385 204 L1385 672" marker-end="url(#arrow)" />
+  <path class="edge" d="M1580 344 L1580 672" marker-end="url(#arrow)" />
+  <path class="edge" d="M1195 484 L1195 672" marker-end="url(#arrow)" />
+  <path class="edge" d="M1195 624 L1195 672" marker-end="url(#arrow)" />
+
+  <rect class="node process" x="960" y="676" width="330" height="72" rx="10" />
+  <text class="label" x="1125" y="706" text-anchor="middle">insert_notion.py 统一入库</text>
+  <text class="small" x="1125" y="726" text-anchor="middle">按链接去重 · 平台名映射 · 正文分块</text>
+  <text class="small" x="1125" y="740" text-anchor="middle">④ 建议: 加统一调度入口（丢链接自动识别平台）</text>
+
+  <path class="edge" d="M1290 712 L1350 712" marker-end="url(#arrow)" />
+  <rect class="node storage" x="1352" y="676" width="300" height="72" rx="10" />
+  <text class="label" x="1502" y="706" text-anchor="middle">Notion「存档记录」</text>
+  <text class="small" x="1502" y="726" text-anchor="middle">data_source 模式 · 7条零重复</text>
+
+  <!-- ============================================================ -->
+  <!-- ===== 图例 + 优化点说明 ===== -->
+  <line class="edge" x1="20" y1="790" x2="1700" y2="790" />
+  <text class="legend-title" x="20" y="820">图例</text>
+  <rect class="node input" x="20" y="834" width="22" height="16" rx="3" /><text class="legend-text" x="50" y="847">输入/链接</text>
+  <rect class="node process" x="130" y="834" width="22" height="16" rx="3" /><text class="legend-text" x="160" y="847">处理/采集</text>
+  <rect class="node external" x="250" y="834" width="22" height="16" rx="3" /><text class="legend-text" x="280" y="847">下载/直链</text>
+  <rect class="node storage" x="360" y="834" width="22" height="16" rx="3" /><text class="legend-text" x="390" y="847">数据契约/存储</text>
+  <rect class="node risk" x="500" y="834" width="22" height="16" rx="3" /><text class="legend-text" x="530" y="847">风险/待优化</text>
+  <rect class="zone" x="630" y="828" width="40" height="24" rx="4" /><text class="legend-text" x="680" y="847">优化点范围</text>
+
+  <text class="legend-title" x="20" y="890">建议优化点</text>
+  <text class="legend-text" x="20" y="912">① 抖音弹幕/评论依赖浏览器 CDP（需开着 tab + wsUrl）→ 可研究 a_bogus 签名生成，实现纯 API 直连，摆脱浏览器</text>
+  <text class="legend-text" x="20" y="932">② 快手元数据/评论同样依赖 CDP → 需逆向 Apollo GraphQL 接口与签名；视频下载必须 curl（urllib TLS 指纹被拒）</text>
+  <text class="legend-text" x="20" y="952">③ 小红书链接带 xsec_token 有时效（过期 404）→ 可研究 token 生成算法，实现免手动换链接</text>
+  <text class="legend-text" x="20" y="972">④ 各脚本目前需手动传 wsUrl 参数 → 建议做统一调度入口：丢链接 → 自动识别平台 → 自动全流程 → 返回 Notion 链接</text>
+  <text class="legend-text" x="1020" y="912">⑤ FunASR 模型每次加载约 30s → 可常驻服务 + GPU（RTX 4070 可加速约 10x）</text>
+  <text class="legend-text" x="1020" y="932">⑥ 音频/视频直链带签名有时效 → 需及时下载；B站弹幕 XML 是 raw deflate 需专用解压</text>
+</svg>
+</main>
