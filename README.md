@@ -57,37 +57,47 @@ export NOTION_TOKEN=ntn_xxx     # Notion API Token（必需）
 
 ### 3. 运行
 
+**方式一：一键调度（推荐，不依赖对话）**
+
 ```bash
 # B站（无需浏览器）
+python run.py "https://www.bilibili.com/video/BV1xxxx"
+
+# 抖音（自动检测浏览器 tab；需先 openclaw browser open 视频页）
+python run.py "https://www.douyin.com/video/7xxx"
+
+# 小红书（链接需带有效 xsec_token）
+python run.py "https://www.xiaohongshu.com/explore/xxx?xsec_token=..."
+
+# 快手（需先 openclaw browser open 详情页）
+python run.py "https://www.kuaishou.com/short-video/5xxx"
+
+# 可选参数
+python run.py <链接> --update      # 已存在则覆盖更新（默认跳过）
+python run.py <链接> --no-insert   # 只采集不入库
+python run.py <链接> --ws-url ws://...  # 手动指定浏览器 wsUrl
+```
+
+自动流程：识别平台 → 调对应 process 脚本 → 产出 result.json → 入库 → 返回 Notion 链接。
+
+**方式二：分步执行**
+
+```bash
+# 采集（各平台独立脚本）
 python scripts/bilibili_process.py "https://www.bilibili.com/video/BV1xxxx"
-
-# 抖音（需浏览器CDP：openclaw browser open 视频页后取 wsUrl）
-DY_WS_URL=ws://127.0.0.1:18800/devtools/page/XXXX \
-python scripts/douyin_process.py "https://www.douyin.com/video/7xxx"
-
-# 小红书（需浏览器CDP 提取SSR评论；链接必须带 xsec_token）
-XHS_WS_URL=ws://127.0.0.1:18800/devtools/page/XXXX \
-python scripts/xiaohongshu_process.py "https://www.xiaohongshu.com/explore/xxx?xsec_token=..."
-
-# 快手（需浏览器CDP：打开 short-video 详情页）
-python scripts/kuaishou_process.py "https://www.kuaishou.com/short-video/5xxx" \
-  "ws://127.0.0.1:18800/devtools/page/XXXX"
+# 入库
+python scripts/insert_notion.py output/<id>/<id>_result.json [--update]
 ```
 
 产物输出到 `output/<id>/`，数据契约在 `output/<id>/<id>_result.json`。
-
-### 4. 入库 Notion
-
-```bash
-python scripts/insert_notion.py output/<id>/<id>_result.json
-```
 
 ## ⚙️ 配置项（config.py / 环境变量）
 
 | 环境变量 | 说明 | 默认 |
 |---|---|---|
 | `SOCIAL_WORKDIR` | 产物输出目录 | `./output` |
-| `PYTHON_BIN` | FunASR Python 解释器 | `sys.executable` |
+| `PYTHON_BIN` | FunASR Python 解释器 | 本地默认 |
+| `RUNNER_PYTHON` | run.py 调度用轻量解释器 | `sys.executable` |
 | `GEN_SRT_PATH` | gen_srt.py 路径 | 本地默认 |
 | `BILI_FUSION_PATH` | B站 do_fusion_summary.js | 本地默认 |
 | `FUSION_PATH` | 抖音 douyin_fusion.js | `./scripts/douyin_fusion.js` |
