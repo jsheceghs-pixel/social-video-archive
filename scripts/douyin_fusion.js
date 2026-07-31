@@ -17,7 +17,9 @@ const LOW_ENERGY_SAMPLE_RATE = 0.1; // 低能区随机保留 10% 字幕
 const STOP_WORDS = new Set(['晚上好', '晚安', '来了', '打call', '拜拜', '卡了', '嗯', '好', '草', '哈哈', '确实', '牛', '可爱', '感谢观看', '谢谢观看']);
 const FILLER_REGEX = /^(呃|那个|就是|然后|哪怕|其实|我觉得|算是|哎呀|有点|怎么说呢|所以|这种|啊|哦)+/g;
 
-const BASE = __dirname;
+// 文件基准目录：使用当前工作目录（cwd），而非脚本所在目录
+// 这样调用方（douyin_process.py）在产物目录下运行即可
+const BASE = process.cwd();
 
 function parseSrtTimestamp(timeStr) {
   const match = timeStr.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
