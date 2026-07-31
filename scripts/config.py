@@ -51,6 +51,10 @@ CDP_EVAL_JS = _env_or_default(
     'CDP_EVAL_JS',
     os.path.join(PROJECT_ROOT, 'scripts', 'cdp_eval.js'),
 )
+CDP_NAVIGATE_JS = _env_or_default(
+    'CDP_NAVIGATE_JS',
+    os.path.join(PROJECT_ROOT, 'scripts', 'cdp_navigate.js'),
+)
 SOCIALKIT_DIR = _env_or_default('SOCIALKIT_DIR', r'D:\social-media-toolkit')
 
 # ---- 凭据（不提交到仓库，见 config.example.json / .gitignore）----
@@ -58,6 +62,11 @@ DOUYIN_COOKIES = _env_or_default(
     'DOUYIN_COOKIES',
     os.path.join(PROJECT_ROOT, 'config', 'douyin_cookies.json'),
 )
+# 本机兼容：项目 config/ 下没有 cookie 时，回退到 OpenClaw workspace 的 cookie（迁移期）
+if not os.path.exists(DOUYIN_COOKIES):
+    _ws_cookies = os.path.expandvars(r'%USERPROFILE%\.openclaw\workspace\douyin\douyin_cookies.json')
+    if os.path.exists(_ws_cookies):
+        DOUYIN_COOKIES = _ws_cookies
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN', '')
 
 # 本地敏感配置（config/secret.json，gitignore 排除，不提交仓库）
