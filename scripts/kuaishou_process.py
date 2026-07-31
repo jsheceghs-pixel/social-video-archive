@@ -29,11 +29,9 @@ CDP_SCRIPT = config.CDP_EVAL_JS
 
 
 def extract_photo_id(url):
-    """从链接提取 photoId（支持 short-video 直链；短链需浏览器先跳转）"""
-    m = re.search(r'/short-video/(\d+)', url or '')
-    if m:
-        return m.group(1)
-    return None
+    """从链接提取 photoId（支持短链解析后的 short-video 链接；新版 ID 为字母数字混合）"""
+    m = re.search(r'/short-video/([0-9A-Za-z_-]{5,30})', url or '')
+    return m.group(1) if m else None
 
 
 def resolve_shortlink(ws_url, short_url):
@@ -69,6 +67,22 @@ def cdp_eval(ws_url, expression):
         return json.loads(out).get('value')
     except Exception:
         print('[CDP输出]', out[:300])
+        return None
+
+
+def cdp_navigate(ws_url, url, wait_ms=10000):
+    """通过 CDP 导航页面并等待加载（确保 Apollo 数据是目标视频的）"""
+    nav_script = config.CDP_NAVIGATE_JS
+    r = subprocess.run(['node', nav_script, ws_url, url, str(wait_ms)],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=wait_ms // 1000 + 30)
+    out = r.stdout.strip()
+    if not out:
+        return None
+    out = out.split('\n')[-1]
+    try:
+        return json.loads(out).get('value')
+    except Exception:
+        print('[CDP导航]', out[:300])
         return None
 
 
@@ -131,6 +145,13 @@ def main():
 
     # ---- 1. CDP 提取 Apollo 元数据 ----
     print('\n[1/5] CDP 提取 Apollo 数据...')
+    # 先导航到目标视频详情页（确保 Apollo 数据是当前视频的）
+    print('  导航到视频详情页...')
+    nav_state = cdp_navigate(ws_url, url)
+    if nav_state:
+        print(f'  页面: {str(nav_state)[:80]}')
+    else:
+        print('  [提示] 导航可能未完成，尝试直接提取')
     expr = """(() => {
       const cache = window.__APOLLO_STATE__ && window.__APOLLO_STATE__.defaultClient;
       if (!cache) return JSON.stringify({err: 'no apollo'});
