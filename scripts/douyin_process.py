@@ -41,14 +41,22 @@ def load_cookie_header():
 
 
 def http_get(url, referer='https://www.douyin.com/', binary=False, timeout=60):
-    headers = {'User-Agent': UA, 'Referer': referer}
+    """抖音 API GET，用 curl（urllib 偶发卡死/TLS 指纹被拒）"""
+    import tempfile
+    tmp = os.path.join(tempfile.gettempdir(), 'dy_http_tmp')
+    cmd = ['curl.exe', '-s', '-L', '--max-time', str(timeout), '-o', tmp,
+           url, '-H', f'User-Agent: {UA}', '-H', f'Referer: {referer}']
     cookie = load_cookie_header()
     if cookie:
-        headers['Cookie'] = cookie
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = resp.read()
-    return data if binary else data.decode('utf-8', errors='replace')
+        cmd += ['-H', f'Cookie: {cookie}']
+    r = subprocess.run(cmd, capture_output=True, timeout=timeout + 15)
+    if not os.path.exists(tmp):
+        raise RuntimeError(f'curl 下载失败: {url[:60]}')
+    data = open(tmp, 'rb').read()
+    os.remove(tmp)
+    if binary:
+        return data
+    return data.decode('utf-8', errors='replace')
 
 
 def cdp_eval(ws_url, expression):
