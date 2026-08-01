@@ -172,7 +172,15 @@ def main():
     ap.add_argument('--no-insert', action='store_true', help='只采集，不入库')
     ap.add_argument('--workdir', default=config.WORKDIR, help='产物目录')
     ap.add_argument('--ws-url', help='手动指定浏览器 wsUrl（跳过自动检测）')
+    ap.add_argument('--quiet', action='store_true', help='精简输出（只显示关键结果，日志落盘）')
     args = ap.parse_args()
+
+    def say(msg):
+        """quiet 模式只显示关键行（以 [OK]/[DONE]/[FAIL]/== 开头）"""
+        if not args.quiet:
+            print(msg)
+        elif msg.startswith(('[OK]', '[DONE]', '[FAIL]', '==', '  采集耗时', '   页面:', '   椤甸潰:', '   鏍囬')):
+            print(msg)
 
     link = args.link.strip()
     platform = detect_platform(link)
@@ -180,8 +188,8 @@ def main():
         print(f'[FAIL] 无法识别平台: {link[:60]}')
         print('支持的平台: B站 / 抖音 / 小红书 / 快手')
         sys.exit(1)
-    print(f'== 平台: {platform} ==')
-    print(f'== 链接: {link[:90]} ==')
+    say(f'== 平台: {platform} ==')
+    say(f'== 链接: {link[:90]} ==')
 
     # 短链解析（v.douyin.com / v.kuaishou.com / xhslink.com / b23.tv）
     link = resolve_shortlink(link)
@@ -191,19 +199,37 @@ def main():
     env['PYTHONIOENCODING'] = 'utf-8'
     env['SOCIAL_WORKDIR'] = args.workdir
 
+    # 日志文件（quiet 模式落盘用；默认也写，方便排查）
+    log_dir = os.path.join(args.workdir, '_logs')
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f'run_{platform}_{int(time.time())}.log')
+    log_fh = open(log_file, 'w', encoding='utf-8')
+
+    def run_captured(cmd, env_extra=None):
+        """运行子进程：默认透传输出；quiet 模式重定向到日志文件。返回 (returncode, 日志内容)"""
+        e = dict(env)
+        if env_extra:
+            e.update(env_extra)
+        if args.quiet:
+            r = subprocess.run(cmd, env=e, stdout=log_fh, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+            return r.returncode, ''
+        else:
+            r = subprocess.run(cmd, env=e)
+            return r.returncode, ''
+
     # 需要 wsUrl 的平台：优先创建独立采集 tab（不干扰用户浏览），失败才回退现有 tab
     ws_env_name = WS_ENV.get(platform)
     if ws_env_name:
         ws_url = args.ws_url
         tab_id = None
         if not ws_url:
-            print('[浏览器] 创建独立采集 tab（不干扰你正在看的页面）...')
+            say('[浏览器] 创建独立采集 tab（不干扰你正在看的页面）...')
             tab_id, ws_url = create_tab(link)
         if not ws_url:
-            print('  [回退] 新 tab 创建失败，尝试使用现有 tab...')
+            say('  [回退] 新 tab 创建失败，尝试使用现有 tab...')
             ws_url = find_ws_url(platform)
         if ws_url:
-            print(f'[OK] 浏览器 wsUrl: {ws_url[:60]}...')
+            say(f'[OK] 浏览器 wsUrl: {ws_url[:60]}...')
             if platform == 'kuaishou':
                 # 快手脚本 wsUrl 是第2个位置参数
                 cmd = [config.PYTHON_BIN, PROCESS_SCRIPTS[platform], link, ws_url, args.workdir]
@@ -211,44 +237,74 @@ def main():
                 env[ws_env_name] = ws_url
                 cmd = [config.PYTHON_BIN, PROCESS_SCRIPTS[platform], link, args.workdir]
         else:
-            print(f'[提示] 未检测到 {platform} 浏览器 tab')
-            print(f'  {platform} 采集弹幕/评论需要浏览器 CDP。请先:')
-            print('    1. openclaw browser open "<视频链接>"')
-            print('    2. 重试本命令，或 --ws-url ws://... 手动指定')
+            say(f'[提示] 未检测到 {platform} 浏览器 tab')
+            say(f'  {platform} 采集弹幕/评论需要浏览器 CDP。请先:')
+            say('    1. openclaw browser open "<视频链接>"')
+            say('    2. 重试本命令，或 --ws-url ws://... 手动指定')
+            log_fh.close()
             sys.exit(1)
     else:
         cmd = [config.PYTHON_BIN, PROCESS_SCRIPTS[platform], link, args.workdir]
 
-    print(f'\n[1/2] 开始采集（{platform}）...')
+    say(f'\n[1/2] 开始采集（{platform}）...')
     t0 = time.time()
-    r = subprocess.run(cmd, env=env, cwd=os.path.dirname(PROCESS_SCRIPTS[platform]))
-    if r.returncode != 0:
+    rc, _ = run_captured(cmd)
+    if rc != 0:
         print('[FAIL] 采集脚本异常退出')
+        print(f'  日志: {log_file}')
+        # 失败时打印日志尾部（诊断用）
+        log_fh.flush()
+        with open(log_file, encoding='utf-8', errors='replace') as f:
+            lines = f.readlines()
+        print('  --- 日志尾部 ---')
+        print(''.join(lines[-25:]))
+        log_fh.close()
         sys.exit(1)
-    print(f'  采集耗时: {time.time() - t0:.0f}s')
+    say(f'  采集耗时: {time.time() - t0:.0f}s')
 
     # 找 result.json
     result_file = find_result_file(platform, args.workdir, link)
     if not result_file:
         print('[FAIL] 未找到 result.json 产物')
+        print(f'  日志: {log_file}')
+        log_fh.close()
         sys.exit(1)
-    print(f'[OK] 数据契约: {result_file}')
+    say(f'[OK] 数据契约: {result_file}')
 
     # 入库
     if args.no_insert:
-        print('\n[2/2] 跳过入库（--no-insert）')
-        print(f'产物目录: {os.path.dirname(result_file)}')
+        say('\n[2/2] 跳过入库（--no-insert）')
+        say(f'产物目录: {os.path.dirname(result_file)}')
+        log_fh.close()
         sys.exit(0)
 
-    print('\n[2/2] 入库 Notion...')
+    say('\n[2/2] 入库 Notion...')
     insert_cmd = [config.RUNNER_PYTHON, os.path.join(SCRIPTS_DIR, 'insert_notion.py'), result_file]
     if args.update:
         insert_cmd.append('--update')
-    r2 = subprocess.run(insert_cmd, env=env, cwd=SCRIPTS_DIR)
-    if r2.returncode != 0:
+    rc2, _ = run_captured(insert_cmd)
+    if rc2 != 0:
         print('[FAIL] 入库失败')
+        print(f'  日志: {log_file}')
+        log_fh.flush()
+        with open(log_file, encoding='utf-8', errors='replace') as f:
+            lines = f.readlines()
+        print('  --- 日志尾部 ---')
+        print(''.join(lines[-25:]))
+        log_fh.close()
         sys.exit(1)
-    print('\n[DONE] 全部完成')
+    say('\n[DONE] 全部完成')
+    # quiet 模式下入库结果在日志文件里，提取 Notion 链接显示
+    if args.quiet:
+        log_fh.flush()
+        with open(log_file, encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        m = re.search(r'页面: (https://app\.notion\.com/[^\s]+)', content)
+        if m:
+            print(f'[OK] Notion: {m.group(1)}')
+        elif 'HTTP_STATUS:200' in content:
+            print('[OK] 已写入 Notion（页面链接见日志）')
+    log_fh.close()
 
 
 if __name__ == '__main__':
