@@ -28,20 +28,28 @@ FFMPEG = config.FFMPEG_BIN
 UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
 
-def http_get(url, referer='https://www.bilibili.com/', timeout=60, binary=False):
-    """B站 API GET，用 curl（urllib 偶发卡死/被 B站 TLS 指纹拒绝）"""
+def http_get(url, referer='https://www.bilibili.com/', timeout=60, binary=False, retries=3):
+    """B站 API GET，用 curl（urllib 偶发卡死/被 B站 TLS 指纹拒绝）。
+    -f: HTTP 错误码直接失败；重试 3 次应对间歇性 503。"""
     import tempfile
     tmp = os.path.join(tempfile.gettempdir(), 'bili_http_tmp')
-    cmd = ['curl.exe', '-s', '-L', '--max-time', str(timeout), '-o', tmp,
-           url, '-H', f'User-Agent: {UA}', '-H', f'Referer: {referer}']
-    r = subprocess.run(cmd, capture_output=True, timeout=timeout + 15)
-    if not os.path.exists(tmp):
-        raise RuntimeError(f'curl 下载失败: {url[:60]}')
-    data = open(tmp, 'rb').read()
-    os.remove(tmp)
-    if binary:
-        return data
-    return data.decode('utf-8', errors='replace')
+    last_err = None
+    for attempt in range(1, retries + 1):
+        cmd = ['curl.exe', '-s', '-L', '-f', '--retry', '2', '--max-time', str(timeout), '-o', tmp,
+               url, '-H', f'User-Agent: {UA}', '-H', f'Referer: {referer}']
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout + 15)
+        if not os.path.exists(tmp):
+            last_err = f'curl 未产出文件 (attempt {attempt})'
+            continue
+        data = open(tmp, 'rb').read()
+        os.remove(tmp)
+        if not data:
+            last_err = f'curl 下载为空 (attempt {attempt})'
+            continue
+        if binary:
+            return data
+        return data.decode('utf-8', errors='replace')
+    raise RuntimeError(f'curl 下载失败: {url[:60]} ({last_err})')
 
 
 def run(cmd, **kw):
@@ -126,11 +134,10 @@ def main():
         sys.exit(1)
 
     audio_raw = os.path.join(out_dir, 'audio.m4s')
-    http_get(audio_url, referer=f'https://www.bilibili.com/video/{bvid}', binary=True)
-    # urllib 下载（带 referer）
-    req = urllib.request.Request(audio_url, headers={'User-Agent': UA, 'Referer': f'https://www.bilibili.com/video/{bvid}'})
-    with urllib.request.urlopen(req, timeout=120) as resp, open(audio_raw, 'wb') as f:
-        f.write(resp.read())
+    # 用 curl 下载（urllib TLS 指纹会被 B站拒 503）
+    audio_data = http_get(audio_url, referer=f'https://www.bilibili.com/video/{bvid}', binary=True)
+    with open(audio_raw, 'wb') as f:
+        f.write(audio_data)
     print(f'  音频已下载: {os.path.getsize(audio_raw)} bytes')
 
     # 转成 mp3 供 FunASR
