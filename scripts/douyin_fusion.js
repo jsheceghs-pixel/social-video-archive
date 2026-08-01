@@ -146,6 +146,7 @@ function main() {
   const videoId = process.argv[2] || '7665048999434390793';
   const dmFile = resolveFile(`danmaku_${videoId}.json`);
   const srtFile = resolveFile(`test_${videoId}.srt`);
+  const rawFile = resolveFile(`audio_raw.txt`); // 完整原文（gen_srt.py 产物，同目录）
   const outFile = path.join(path.dirname(dmFile), `${videoId}_AI_HIGHLIGHT.txt`);
 
   if (!fs.existsSync(dmFile)) { console.error('弹幕文件不存在:', dmFile); return; }
@@ -154,11 +155,34 @@ function main() {
   // --- 1. 解析弹幕 ---
   const dmData = JSON.parse(fs.readFileSync(dmFile, 'utf8'));
   const danmaku = dmData.danmaku || [];
+
+  // --- 1.5 解析 SRT（先解析，用于时长兜底） ---
+  const srtContent = fs.readFileSync(srtFile, 'utf8');
+  const blocks = srtContent.split(/\n\s*\n/);
+  const subtitles = []; // { start, end, text }
+  for (const block of blocks) {
+    const lines = block.split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length < 3) continue;
+    const timeLine = lines.find(l => l.includes('-->'));
+    if (!timeLine) continue;
+    const [startStr, endStr] = timeLine.split(' --> ');
+    const start = parseSrtTimestamp(startStr);
+    const end = parseSrtTimestamp(endStr);
+    const rawText = lines.slice(lines.indexOf(timeLine) + 1).join('');
+    const text = aggressiveClean(rawText);
+    if (text.length < 2 || STOP_WORDS.has(text)) continue;
+    subtitles.push({ start, end, text });
+  }
+  subtitles.sort((a, b) => a.start - b.start);
+
+  // 视频时长：弹幕最大时刻 + SRT 最后一块结束时间，取较大者（不写死）
   let maxDuration = 0;
   for (const d of danmaku) {
     if (d.offset_time > maxDuration) maxDuration = d.offset_time;
   }
-  maxDuration = Math.max(maxDuration, 243067); // 视频时长兜底
+  if (subtitles.length > 0) {
+    maxDuration = Math.max(maxDuration, subtitles[subtitles.length - 1].end);
+  }
   console.log(`💬 总弹幕数: ${danmaku.length}, 视频时长约 ${Math.floor(maxDuration / 60000)} 分钟`);
 
   // --- 2. 热力桶 + 纯密度阈值（通道1高能段判定） ---
@@ -202,23 +226,7 @@ function main() {
   console.log(`🗂 段落切分: 共 ${segments.length} 段，其中高能段 ${highCount} 个`);
 
   // --- 4. 解析 SRT（保留每块的 start/end） ---
-  const srtContent = fs.readFileSync(srtFile, 'utf8');
-  const blocks = srtContent.split(/\n\s*\n/);
-  const subtitles = []; // { start, end, text }
-  for (const block of blocks) {
-    const lines = block.split('\n').map(l => l.trim()).filter(l => l);
-    if (lines.length < 3) continue;
-    const timeLine = lines.find(l => l.includes('-->'));
-    if (!timeLine) continue;
-    const [startStr, endStr] = timeLine.split(' --> ');
-    const start = parseSrtTimestamp(startStr);
-    const end = parseSrtTimestamp(endStr);
-    const rawText = lines.slice(lines.indexOf(timeLine) + 1).join('');
-    const text = aggressiveClean(rawText);
-    if (text.length < 2 || STOP_WORDS.has(text)) continue;
-    subtitles.push({ start, end, text });
-  }
-  subtitles.sort((a, b) => a.start - b.start);
+  // （已在 1.5 步解析为 subtitles，此处保留注释说明）
 
   // --- 5. 双通道选弹幕 + L1/L2/L3 对齐 ---
   // merged: Map<key, { blk, dms: Set, fromHigh: bool, fromTop: bool, level }>
@@ -271,7 +279,7 @@ function main() {
   output.push('---');
 
   const sortedEntries = [...merged.entries()].sort((a, b) => a[1].blk.start - b[1].blk.start);
-  // 分区：L1/L2 命中的块进 🔥/🔶；L3 虚拟块统一进 L3 兜底区（避免重叠重复）
+  // 分区：L1/L2 命中的块进 🔥/🔶；L3 虚拟块单独处理
   const highL12 = [], topL12 = [], l3Blocks = [];
   for (const [, entry] of sortedEntries) {
     const blk = entry.blk;
@@ -283,86 +291,167 @@ function main() {
 
   const levelIcon = { L1: 'L1', L2: 'L2', L3: 'L3' };
 
-  if (highL12.length > 0) {
-    output.push('【🔥 密度高能段对应文案】');
-    for (const [blk, entry] of highL12.sort((a, b) => a[0].start - b[0].start)) {
-      const dms = [...entry.dms].sort((a, b) => (b.digg_count || 0) - (a.digg_count || 0));
-      const dmsText = dms.map(d => `${d.text}(x${d.digg_count || 0}赞)@${formatSec(d.offset_time)}`).join(' / ');
-      output.push(`  [${formatSec(blk.start)}-${formatSec(blk.end)}] 🔥[${levelIcon[entry.level]}] ${blk.text}  (💬 ${dmsText})`);
+  // ===== 统一块归属表：每块只输出一次，优先级 L1/L2 > L3 > 高能段衔接 > 低能段衔接 =====
+  // owner: Map<块start, { level: 'L12'|'L3', entry }>
+  const owner = new Map();
+  // 1. 优先：L1/L2 命中块
+  for (const [blk, entry] of [...highL12, ...topL12]) {
+    if (!owner.has(blk.start)) owner.set(blk.start, { level: 'L12', entry });
+  }
+  // 2. 其次：L3 窗口（裁剪到弹幕时刻所在段，剔除 L12 已占块）
+  const islandDms = []; // { dm, seg }
+  const lowSegs = segments.filter(s => !s.isHigh);
+  for (const [blk, entry] of l3Blocks) {
+    const dmsArr = [...entry.dms];
+    const dmTime = dmsArr[0] ? dmsArr[0].offset_time : blk.start;
+    const inLowSeg = lowSegs.find(s => dmTime >= s.start && dmTime < s.end);
+    if (inLowSeg) {
+      // 弹幕落在低能段 → 孤岛高赞标注
+      for (const dm of dmsArr) islandDms.push({ dm, seg: inLowSeg });
+      continue;
+    }
+    // 弹幕所在段（高能段），裁剪窗口到该段内
+    const dmSeg = segments.find(s => dmTime >= s.start && dmTime < s.end);
+    const segKept = dmSeg
+      ? blk.l3Subs.filter(s => s.start >= dmSeg.start && s.start < dmSeg.end && !owner.has(s.start))
+      : blk.l3Subs.filter(s => !owner.has(s.start));
+    if (segKept.length === 0) continue;
+    // 同一段内的 L3 窗口合并：若已有同段 L3 块且时间相邻，则合并
+    // 找到该段内已归属的 L3 窗口（按段起始时间分组）
+    let mergedInto = null;
+    for (const [, o] of owner) {
+      if (o.level === 'L3' && o.entry.blk.l3Window) {
+        const b = o.entry.blk;
+        if (dmSeg && b.start >= dmSeg.start && b.start < dmSeg.end) {
+          // 同段内的 L3 窗口，检查是否时间重叠/相邻
+          if (segKept[0].start <= b.end + 1000) { mergedInto = o.entry; break; }
+        }
+      }
+    }
+    if (mergedInto) {
+      // 合并：扩展窗口，去重块，合并弹幕
+      const b = mergedInto.blk;
+      const seen = new Set(b.l3Subs.map(s => s.start));
+      for (const s of segKept) {
+        if (!seen.has(s.start)) { b.l3Subs.push(s); seen.add(s.start); }
+      }
+      b.l3Subs.sort((a, b2) => a.start - b2.start);
+      b.start = b.l3Subs[0].start;
+      b.end = b.l3Subs[b.l3Subs.length - 1].end;
+      b.text = b.l3Subs.map(s => s.text).join('。');
+      for (const dm of entry.dms) mergedInto.dms.add(dm);
+      mergedInto.fromHigh = mergedInto.fromHigh || entry.fromHigh;
+      mergedInto.fromTop = mergedInto.fromTop || entry.fromTop;
+      for (const s of segKept) {
+        if (!owner.has(s.start)) owner.set(s.start, { level: 'L3', entry: mergedInto });
+      }
+    } else {
+      const l3Blk = {
+        start: segKept[0].start,
+        end: segKept[segKept.length - 1].end,
+        text: segKept.map(s => s.text).join('。'),
+        l3Subs: segKept,
+        l3Window: true,
+      };
+      const newEntry = { blk: l3Blk, dms: new Set(entry.dms), fromHigh: entry.fromHigh, fromTop: entry.fromTop };
+      for (const s of segKept) {
+        if (!owner.has(s.start)) owner.set(s.start, { level: 'L3', entry: newEntry });
+      }
     }
   }
 
-  if (topL12.length > 0) {
+  // ===== 输出：按段组织 =====
+  const islandBySeg = new Map(); // seg.start -> [dm...]
+  for (const { dm, seg } of islandDms) {
+    if (!islandBySeg.has(seg.start)) islandBySeg.set(seg.start, []);
+    islandBySeg.get(seg.start).push(dm);
+  }
+
+  const highSegs = segments.filter(s => s.isHigh);
+  const lowOutSegs = segments.filter(s => !s.isHigh);
+
+  // 高能段输出（L12 锚点 + L3 窗口 + 段内剩余衔接）
+  if (highSegs.length > 0) {
+    output.push('【🔥 密度高能段对应文案】');
+    for (const seg of highSegs) {
+      const segSubs = subtitles.filter(s => s.start >= seg.start && s.start < seg.end);
+      if (segSubs.length === 0) continue;
+      let pendingConn = []; // 连续未归属块，合并成衔接段
+      const printedL3 = new Set(); // 已输出的 L3 窗口（按起始时间去重）
+      const flushConn = () => {
+        if (pendingConn.length === 0) return;
+        const text = pendingConn.map(s => s.text).join('。');
+        output.push(`  [${formatSec(pendingConn[0].start)}-${formatSec(pendingConn[pendingConn.length - 1].end)}] ▫️ ${text}`);
+        pendingConn = [];
+      };
+      for (const s of segSubs) {
+        const own = owner.get(s.start);
+        if (!own) { pendingConn.push(s); continue; }
+        flushConn();
+        if (own.level === 'L12') {
+          const [blk, en] = [own.entry.blk, own.entry];
+          const dms = [...en.dms].sort((a, b) => (b.digg_count || 0) - (a.digg_count || 0));
+          const dmsText = dms.map(d => `${d.text}(x${d.digg_count || 0}赞)@${formatSec(d.offset_time)}`).join(' / ');
+          output.push(`  [${formatSec(blk.start)}-${formatSec(blk.end)}] 🔥[${levelIcon[en.level]}] ${blk.text}  (💬 ${dmsText})`);
+        } else if (own.level === 'L3') {
+          const en = own.entry;
+          const l3Key = en.blk.start; // 按窗口起始时间去重
+          if (printedL3.has(l3Key)) continue;
+          printedL3.add(l3Key);
+          const dms = [...en.dms].sort((a, b) => (b.digg_count || 0) - (a.digg_count || 0));
+          const dmsText = dms.map(d => `${d.text}(x${d.digg_count || 0}赞)@${formatSec(d.offset_time)}`).join(' / ');
+          output.push(`  [${formatSec(en.blk.start)}-${formatSec(en.blk.end)}] 🔥[L3] ${en.blk.text}  (💬 ${dmsText})`);
+        }
+      }
+      flushConn();
+    }
+  }
+
+  // 高赞榜补漏（低能段内的高赞弹幕 L12 命中，独立区）
+  const topOnlyBlocks = topL12.filter(([blk]) => {
+    const seg = lowSegs.find(s => blk.start >= s.start && blk.start < s.end);
+    return !!seg;
+  });
+  if (topOnlyBlocks.length > 0) {
     output.push('【🔶 高赞弹幕榜补漏（低能段）】');
-    for (const [blk, entry] of topL12.sort((a, b) => a[0].start - b[0].start)) {
+    for (const [blk, entry] of topOnlyBlocks.sort((a, b) => a[0].start - b[0].start)) {
       const dms = [...entry.dms].sort((a, b) => (b.digg_count || 0) - (a.digg_count || 0));
       const dmsText = dms.map(d => `${d.text}(x${d.digg_count || 0}赞)@${formatSec(d.offset_time)}`).join(' / ');
       output.push(`  [${formatSec(blk.start)}-${formatSec(blk.end)}] 🔶[${levelIcon[entry.level]}] ${blk.text}  (💬 ${dmsText})`);
     }
   }
 
-  // L3 兜底区：按起始时间排序，窗口重叠的合并（按包含的文案块去重拼接）
-  if (l3Blocks.length > 0) {
-    // 已被 L1/L2 精准命中的文案块（按 start 记录），L3 窗口要剔除它们，避免重复输出
-    const l12Starts = new Set();
-    for (const [, entry] of merged) {
-      if (!entry.blk.l3Window) l12Starts.add(entry.blk.start);
+  // 低能段衔接（剩余未归属块，完整输出 + 孤岛高赞标注）
+  for (const seg of lowOutSegs) {
+    const segSubs = subtitles.filter(s => s.end > seg.start && s.start < seg.end);
+    if (segSubs.length === 0) continue;
+    const unowned = segSubs.filter(s => !owner.has(s.start));
+    if (unowned.length === 0 && !islandBySeg.has(seg.start)) continue;
+    const body = unowned.map(s => s.text).join('。');
+    let line = `▫️ ${formatSec(seg.start)}-${formatSec(Math.min(seg.end - 1000, maxDuration))} ${body}`;
+    const islands = (islandBySeg.get(seg.start) || []).sort((a, b) => (b.digg_count || 0) - (a.digg_count || 0));
+    if (islands.length > 0) {
+      const islandText = islands.map(d => `${formatSec(d.offset_time)}「${d.text}」x${d.digg_count || 0}赞`).join(' / ');
+      line += `  ⚡ 孤岛高赞：${islandText}`;
     }
-    l3Blocks.sort((a, b) => a[0].start - b[0].start);
-    const mergedL3 = []; // { blk, dms:Set, fromHigh, fromTop }
-    for (const [blk, entry] of l3Blocks) {
-      // 剔除已被 L1/L2 命中的块
-      const keptSubs = blk.l3Subs.filter(s => !l12Starts.has(s.start));
-      if (keptSubs.length === 0) {
-        // 窗口内全部被 L1/L2 覆盖 → 该 L3 弹幕无需输出（已有精准对应）
-        continue;
-      }
-      const keptBlk = { ...blk, l3Subs: keptSubs, start: keptSubs[0].start, end: keptSubs[keptSubs.length - 1].end, text: keptSubs.map(s => s.text).join('。') };
-      const last = mergedL3[mergedL3.length - 1];
-      if (last && keptBlk.start <= last.blk.end) {
-        // 重叠 → 合并：扩展范围，文案块按 start 去重拼接
-        last.blk.end = Math.max(last.blk.end, keptBlk.end);
-        const seen = new Set(last.blk.l3Subs.map(s => s.start));
-        for (const s of keptBlk.l3Subs) {
-          if (!seen.has(s.start)) {
-            last.blk.l3Subs.push(s);
-            seen.add(s.start);
-          }
-        }
-        last.blk.l3Subs.sort((a, b) => a.start - b.start);
-        last.blk.text = last.blk.l3Subs.map(s => s.text).join('。');
-        for (const dm of entry.dms) last.dms.add(dm);
-        last.fromHigh = last.fromHigh || entry.fromHigh;
-        last.fromTop = last.fromTop || entry.fromTop;
-      } else {
-        mergedL3.push({ blk: keptBlk, dms: new Set(entry.dms), fromHigh: entry.fromHigh, fromTop: entry.fromTop });
-      }
-    }
-    if (mergedL3.length > 0) {
-      output.push('【L3 兜底窗口（无文字对应，输出弹幕时刻附近整段文案）】');
-      for (const item of mergedL3) {
-        const dms = [...item.dms].sort((a, b) => (b.digg_count || 0) - (a.digg_count || 0));
-        const dmsText = dms.map(d => `${d.text}(x${d.digg_count || 0}赞)@${formatSec(d.offset_time)}`).join(' / ');
-        const tag = item.fromHigh && item.fromTop ? '🔥🔶' : item.fromHigh ? '🔥' : '🔶';
-        output.push(`  [${formatSec(item.blk.start)}-${formatSec(item.blk.end)}] ${tag}[L3] ${item.blk.text}  (💬 ${dmsText})`);
-      }
-    }
+    output.push(line);
   }
 
-  // 低能段衔接（未命中任何通道的中间段落，精简保留）
-  for (const seg of segments) {
-    if (seg.isHigh) continue;
-    const segSubs = subtitles.filter(s => s.start >= seg.start && s.start < seg.end);
-    if (segSubs.length === 0) continue;
-    const covered = segSubs.filter(s => merged.has(s));
-    if (covered.length === segSubs.length) continue;
-    const body = segSubs.filter(s => !merged.has(s)).map(s => s.text).join('。');
-    if (!body) continue;
-    const hasKeyword = KEYWORD_REGEX.test(body);
-    const short = (!hasKeyword && body.length > MAX_BLOCK_CHARS)
-      ? body.slice(0, MAX_BLOCK_CHARS) + '……'
-      : body;
-    output.push(`▫️ ${formatTimeLabel(seg.start)}-${formatTimeLabel(seg.end - 1000)} ${short}`);
+  // 尾部兜底（SRT 未覆盖的 full_text 尾部内容）
+  if (fs.existsSync(rawFile)) {
+    const rawText = fs.readFileSync(rawFile, 'utf8').trim();
+    const coveredText = subtitles.map(s => s.text).join('');
+    const tailAnchor = coveredText.slice(-20);
+    const anchorIdx = rawText.lastIndexOf(tailAnchor);
+    let tailText = '';
+    if (anchorIdx >= 0) {
+      tailText = rawText.slice(anchorIdx + tailAnchor.length).trim();
+    }
+    const cleanTail = tailText.replace(/[。，！？、；：…\s]/g, '');
+    if (cleanTail.length >= 10) {
+      const tailStart = subtitles.length > 0 ? subtitles[subtitles.length - 1].end : maxDuration;
+      output.push(`▫️ [${formatSec(tailStart)}+] 结尾 ${tailText}`);
+    }
   }
 
   fs.writeFileSync(outFile, output.join('\n'), 'utf8');
